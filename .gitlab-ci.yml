@@ -10,6 +10,11 @@ variables:
   DB_DATABASE: doktors_test
   DB_USERNAME: doktors_user
   DB_PASSWORD: doktors_pass
+  MYSQL_DATABASE: doktors_test
+  MYSQL_ROOT_PASSWORD: root
+  MYSQL_USER: doktors_user
+  MYSQL_PASSWORD: doktors_pass
+  COMPOSER_ALLOW_SUPERUSER: "1"
 
 test:
   stage: test
@@ -20,13 +25,18 @@ test:
       alias: mysql
 
   before_script:
-    - apt-get update && apt-get install -y git unzip curl libzip-dev libpng-dev libicu-dev libonig-dev nodejs npm default-mysql-client
-    - docker-php-ext-install pdo pdo_mysql mbstring bcmath intl
+    - apt-get update && apt-get install -y git unzip curl default-mysql-client libzip-dev libpng-dev libicu-dev libonig-dev libxml2-dev
+    - curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
+    - apt-get install -y nodejs
+    - docker-php-ext-install pdo pdo_mysql mbstring bcmath intl zip
     - curl -sS https://getcomposer.org/installer | php
-    - php composer.phar install --no-interaction --prefer-dist --optimize-autoloader
-    - npm install
-    - npm run build
+    - mv composer.phar /usr/local/bin/composer
     - cp .env.example .env
+    - mkdir -p storage/framework/cache storage/framework/sessions storage/framework/views bootstrap/cache
+    - chmod -R 777 storage bootstrap/cache
+    - composer install --no-interaction --prefer-dist --optimize-autoloader
+    - npm ci
+    - npm run build
     - php artisan key:generate
     - echo "DB_CONNECTION=mysql" >> .env
     - echo "DB_HOST=mysql" >> .env
@@ -34,6 +44,7 @@ test:
     - echo "DB_DATABASE=doktors_test" >> .env
     - echo "DB_USERNAME=doktors_user" >> .env
     - echo "DB_PASSWORD=doktors_pass" >> .env
+    - until mysqladmin ping -h"$DB_HOST" -uroot -p"$MYSQL_ROOT_PASSWORD" --silent; do echo "Waiting for MySQL..."; sleep 2; done
     - php artisan migrate --force
     - php artisan optimize:clear
 
