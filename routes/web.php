@@ -25,8 +25,8 @@ use Illuminate\Support\Facades\Schema;
 
 Route::get('/', function () {
     // Make landing page robust (fresh installs / test DBs might not have all tables).
-    $specialties = [];
-    $doctors = [];
+    $specialties = collect();
+    $doctors = collect();
 
     if (Schema::hasTable('specialties')) {
         $specialties = Specialty::where('is_active', true)->orderBy('name')->limit(8)->get();
@@ -112,3 +112,4 @@ Route::middleware(['auth', 'verified', 'role:patient'])->group(function () {
 });
 
 require __DIR__.'/auth.php';
+
