@@ -14,6 +14,7 @@ variables:
   MYSQL_ROOT_PASSWORD: root
   MYSQL_USER: doktors_user
   MYSQL_PASSWORD: doktors_pass
+  MYSQL_ROOT_HOST: "%"
   COMPOSER_ALLOW_SUPERUSER: "1"
 
 test:
@@ -44,7 +45,8 @@ test:
     - echo "DB_DATABASE=doktors_test" >> .env
     - echo "DB_USERNAME=doktors_user" >> .env
     - echo "DB_PASSWORD=doktors_pass" >> .env
-    - until mysqladmin ping -h"$DB_HOST" -uroot -p"$MYSQL_ROOT_PASSWORD" --silent; do echo "Waiting for MySQL..."; sleep 2; done
+    - for i in $(seq 1 60); do mysqladmin ping -h"$DB_HOST" -u"$DB_USERNAME" -p"$DB_PASSWORD" --silent && break; echo "Waiting for MySQL... ($i/60)"; sleep 2; done
+    - mysql -h"$DB_HOST" -u"$DB_USERNAME" -p"$DB_PASSWORD" -e "SELECT 1;"
     - php artisan migrate --force
     - php artisan optimize:clear
 
