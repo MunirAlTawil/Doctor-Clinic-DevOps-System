@@ -1,6 +1,8 @@
 stages:
+  - validate
   - build
   - test
+  - package
   - deploy
 
 variables:
@@ -9,18 +11,22 @@ variables:
   DB_CONNECTION: sqlite
   DB_DATABASE: database/database.sqlite
   COMPOSER_ALLOW_SUPERUSER: "1"
+  NPM_CONFIG_CACHE: .npm
+  COMPOSER_CACHE_DIR: .composer-cache
 
-cache:
-  paths:
-    - vendor/
-    - node_modules/
-
-build-job:
-  stage: build
+default:
   image: php:8.2
-
+  cache:
+    key: "$CI_COMMIT_REF_SLUG"
+    paths:
+      - vendor/
+      - node_modules/
+      - .composer-cache/
+      - .npm/
   before_script:
-    - apt-get update && apt-get install -y git unzip curl nodejs npm libzip-dev libpng-dev libicu-dev libonig-dev libxml2-dev libsqlite3-dev sqlite3
+    - apt-get update && apt-get install -y git unzip curl libzip-dev libpng-dev libicu-dev libonig-dev libxml2-dev libsqlite3-dev sqlite3
+    - curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
+    - apt-get install -y nodejs
     - docker-php-ext-install pdo pdo_sqlite mbstring bcmath intl zip
     - curl -sS https://getcomposer.org/installer | php
     - mv composer.phar /usr/local/bin/composer
@@ -28,34 +34,33 @@ build-job:
     - mkdir -p storage/framework/cache storage/framework/sessions storage/framework/views bootstrap/cache database
     - touch database/database.sqlite
     - chmod -R 777 storage bootstrap/cache database
-
-  script:
     - composer install --no-interaction --prefer-dist --optimize-autoloader
+
+workflow:
+  rules:
+    - if: $CI_COMMIT_BRANCH
+    - if: $CI_MERGE_REQUEST_ID
+
+php_syntax:
+  stage: validate
+  script:
+    - find app config database routes tests -name "*.php" -print0 | xargs -0 -n1 php -l
+
+build_frontend:
+  stage: build
+  script:
     - npm ci
     - npm run build
-
   artifacts:
     paths:
-      - vendor/
-      - node_modules/
       - public/build/
-      - .env
-      - database/database.sqlite
-    expire_in: 1 hour
+    expire_in: 1 week
 
-test-job:
+test_application:
   stage: test
-  image: php:8.2
-  dependencies:
-    - build-job
-
-  before_script:
-    - apt-get update && apt-get install -y git unzip curl libzip-dev libpng-dev libicu-dev libonig-dev libxml2-dev libsqlite3-dev sqlite3
-    - docker-php-ext-install pdo pdo_sqlite mbstring bcmath intl zip
-    - cp .env.example .env || true
-    - mkdir -p storage/framework/cache storage/framework/sessions storage/framework/views bootstrap/cache database
-    - touch database/database.sqlite
-    - chmod -R 777 storage bootstrap/cache database
+  needs:
+    - build_frontend
+  script:
     - php artisan key:generate
     - echo "APP_ENV=testing" >> .env
     - echo "APP_DEBUG=true" >> .env
@@ -63,14 +68,44 @@ test-job:
     - echo "DB_DATABASE=database/database.sqlite" >> .env
     - php artisan migrate --force
     - php artisan optimize:clear
-
-  script:
     - php artisan test
+  artifacts:
+    when: always
+    expire_in: 1 week
+    paths:
+      - storage/logs/
 
-deploy-job:
-  stage: deploy
-  image: alpine:latest
+package_project:
+  stage: package
+  needs:
+    - test_application
   script:
-    - echo "Deploy stage placeholder - ready for future deployment"
-  only:
-    - main
+    - echo "Packaging project artifacts..."
+    - tar -czf doctor-clinic-devops-system.tar.gz app bootstrap config database docker k8s public resources routes scripts storage terraform tests artisan composer.json composer.lock package.json package-lock.json phpunit.xml vite.config.js Dockerfile docker-compose.yml .gitignore .dockerignore README.md .github .gitlab-ci.yml DEVOPS-IMPLEMENTATION.md monitoring-plan.md
+  artifacts:
+    paths:
+      - doctor-clinic-devops-system.tar.gz
+    expire_in: 1 week
+
+docker_build:
+  stage: package
+  image:
+    name: gcr.io/kaniko-project/executor:debug
+    entrypoint: [""]
+  needs:
+    - test_application
+  script:
+    - mkdir -p /kaniko/.docker
+    - echo "{\"auths\":{\"$CI_REGISTRY\":{\"username\":\"$CI_REGISTRY_USER\",\"password\":\"$CI_REGISTRY_PASSWORD\"}}}" > /kaniko/.docker/config.json
+    - /kaniko/executor --context "$CI_PROJECT_DIR" --dockerfile "$CI_PROJECT_DIR/Dockerfile" --destination "$CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA" --destination "$CI_REGISTRY_IMAGE:latest"
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+
+deploy_placeholder:
+  stage: deploy
+  script:
+    - echo "Deployment stage is ready."
+    - echo "Later you can replace this with kubectl apply or helm upgrade."
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+      when: manual
