@@ -90,7 +90,7 @@ deploy_placeholder:
   needs:
     - package_project
   script:
-    - echo "Deployment stage placeholder"
-    - echo "Future target: Kubernetes / VM / registry deployment"
+    - 'echo "Deployment stage placeholder"'
+    - 'echo "Future target Kubernetes / VM / registry deployment"'
   only:
     - main
