@@ -11,22 +11,43 @@ variables:
   DB_CONNECTION: sqlite
   DB_DATABASE: database/database.sqlite
   COMPOSER_ALLOW_SUPERUSER: "1"
-  NPM_CONFIG_CACHE: .npm
-  COMPOSER_CACHE_DIR: .composer-cache
+  NODE_ENV: production
 
-default:
-  image: php:8.2
-  cache:
-    key: "$CI_COMMIT_REF_SLUG"
+cache:
+  key: ${CI_COMMIT_REF_SLUG}
+  paths:
+    - vendor/
+    - node_modules/
+
+php_syntax:
+  stage: validate
+  image: php:8.2-cli
+  before_script:
+    - apt-get update && apt-get install -y git unzip curl
+    - curl -sS https://getcomposer.org/installer | php
+    - mv composer.phar /usr/local/bin/composer
+    - composer install --no-interaction --prefer-dist --optimize-autoloader
+  script:
+    - find app config database routes tests -name "*.php" -print0 | xargs -0 -n1 php -l
+
+build_frontend:
+  stage: build
+  image: node:20
+  script:
+    - npm ci
+    - npm run build
+  artifacts:
     paths:
-      - vendor/
-      - node_modules/
-      - .composer-cache/
-      - .npm/
+      - public/build
+    expire_in: 1 week
+
+test_application:
+  stage: test
+  image: php:8.2-cli
+  needs:
+    - build_frontend
   before_script:
     - apt-get update && apt-get install -y git unzip curl libzip-dev libpng-dev libicu-dev libonig-dev libxml2-dev libsqlite3-dev sqlite3
-    - curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
-    - apt-get install -y nodejs
     - docker-php-ext-install pdo pdo_sqlite mbstring bcmath intl zip
     - curl -sS https://getcomposer.org/installer | php
     - mv composer.phar /usr/local/bin/composer
@@ -35,56 +56,31 @@ default:
     - touch database/database.sqlite
     - chmod -R 777 storage bootstrap/cache database
     - composer install --no-interaction --prefer-dist --optimize-autoloader
-
-workflow:
-  rules:
-    - if: $CI_COMMIT_BRANCH
-    - if: $CI_MERGE_REQUEST_ID
-
-php_syntax:
-  stage: validate
-  script:
-    - find app config database routes tests -name "*.php" -print0 | xargs -0 -n1 php -l
-
-build_frontend:
-  stage: build
-  script:
-    - npm ci
-    - npm run build
-  artifacts:
-    paths:
-      - public/build/
-    expire_in: 1 week
-
-test_application:
-  stage: test
-  needs:
-    - build_frontend
-  script:
     - php artisan key:generate
-    - echo "APP_ENV=testing" >> .env
-    - echo "APP_DEBUG=true" >> .env
-    - echo "DB_CONNECTION=sqlite" >> .env
-    - echo "DB_DATABASE=database/database.sqlite" >> .env
     - php artisan migrate --force
     - php artisan optimize:clear
+  script:
     - php artisan test
   artifacts:
     when: always
-    expire_in: 1 week
     paths:
-      - storage/logs/
+      - storage/logs
+    expire_in: 1 week
 
 package_project:
   stage: package
+  image: alpine:latest
   needs:
+    - build_frontend
     - test_application
   script:
-    - echo "Packaging project artifacts..."
-    - tar -czf doctor-clinic-devops-system.tar.gz app bootstrap config database docker k8s public resources routes scripts storage terraform tests artisan composer.json composer.lock package.json package-lock.json phpunit.xml vite.config.js Dockerfile docker-compose.yml .gitignore .dockerignore README.md .github .gitlab-ci.yml DEVOPS-IMPLEMENTATION.md monitoring-plan.md
+    - mkdir -p package
+    - cp -r app bootstrap config database docker k8s public resources routes scripts storage terraform tests package/ || true
+    - cp .env.example artisan composer.json composer.lock package.json package-lock.json phpunit.xml vite.config.js Dockerfile docker-compose.yml monitoring-plan.md DEVOPS-IMPLEMENTATION.md README.md .dockerignore package/ || true
+    - tar -czf doctor-clinic-devops-package.tar.gz package
   artifacts:
     paths:
-      - doctor-clinic-devops-system.tar.gz
+      - doctor-clinic-devops-package.tar.gz
     expire_in: 1 week
 
 docker_build:
@@ -97,15 +93,17 @@ docker_build:
   script:
     - mkdir -p /kaniko/.docker
     - echo "{\"auths\":{\"$CI_REGISTRY\":{\"username\":\"$CI_REGISTRY_USER\",\"password\":\"$CI_REGISTRY_PASSWORD\"}}}" > /kaniko/.docker/config.json
-    - /kaniko/executor --context "$CI_PROJECT_DIR" --dockerfile "$CI_PROJECT_DIR/Dockerfile" --destination "$CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA" --destination "$CI_REGISTRY_IMAGE:latest"
-  rules:
-    - if: '$CI_COMMIT_BRANCH == "main"'
+    - /kaniko/executor --context "$CI_PROJECT_DIR" --dockerfile "$CI_PROJECT_DIR/Dockerfile" --destination "$CI_REGISTRY_IMAGE:latest" --destination "$CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA"
+  only:
+    - main
 
 deploy_placeholder:
   stage: deploy
+  image: alpine:latest
+  needs:
+    - package_project
   script:
-    - echo "Deployment stage is ready."
-    - echo "Later you can replace this with kubectl apply or helm upgrade."
-  rules:
-    - if: '$CI_COMMIT_BRANCH == "main"'
-      when: manual
+    - echo "Deployment stage placeholder"
+    - echo "Future target: Docker registry / Kubernetes / VM deployment"
+  only:
+    - main
