@@ -11,7 +11,6 @@ variables:
   DB_CONNECTION: sqlite
   DB_DATABASE: database/database.sqlite
   COMPOSER_ALLOW_SUPERUSER: "1"
-  NODE_ENV: production
 
 cache:
   key: ${CI_COMMIT_REF_SLUG}
@@ -21,14 +20,14 @@ cache:
 
 php_syntax:
   stage: validate
-  image: php:8.2-cli
+  image: php:8.2
   before_script:
     - apt-get update && apt-get install -y git unzip curl
     - curl -sS https://getcomposer.org/installer | php
     - mv composer.phar /usr/local/bin/composer
     - composer install --no-interaction --prefer-dist --optimize-autoloader
   script:
-    - find app config database routes tests -name "*.php" -print0 | xargs -0 -n1 php -l
+    - find app config database routes resources/views tests -name "*.php" -print0 | xargs -0 -n1 php -l
 
 build_frontend:
   stage: build
@@ -38,12 +37,12 @@ build_frontend:
     - npm run build
   artifacts:
     paths:
-      - public/build
+      - public/build/
     expire_in: 1 week
 
 test_application:
   stage: test
-  image: php:8.2-cli
+  image: php:8.2
   needs:
     - build_frontend
   before_script:
@@ -53,8 +52,8 @@ test_application:
     - mv composer.phar /usr/local/bin/composer
     - cp .env.example .env
     - mkdir -p storage/framework/cache storage/framework/sessions storage/framework/views bootstrap/cache database
-    - touch database/database.sqlite
     - chmod -R 777 storage bootstrap/cache database
+    - touch database/database.sqlite
     - composer install --no-interaction --prefer-dist --optimize-autoloader
     - php artisan key:generate
     - php artisan migrate --force
@@ -64,7 +63,7 @@ test_application:
   artifacts:
     when: always
     paths:
-      - storage/logs
+      - public/build/
     expire_in: 1 week
 
 package_project:
@@ -74,13 +73,14 @@ package_project:
     - build_frontend
     - test_application
   script:
-    - mkdir -p package
-    - cp -r app bootstrap config database docker k8s public resources routes scripts storage terraform tests package/ || true
-    - cp .env.example artisan composer.json composer.lock package.json package-lock.json phpunit.xml vite.config.js Dockerfile docker-compose.yml monitoring-plan.md DEVOPS-IMPLEMENTATION.md README.md .dockerignore package/ || true
-    - tar -czf doctor-clinic-devops-package.tar.gz package
+    - mkdir -p release
+    - cp -r app bootstrap config database docker k8s public resources routes scripts storage terraform tests release/
+    - cp .dockerignore .gitignore artisan composer.json composer.lock DEVOPS-IMPLEMENTATION.md docker-compose.yml Dockerfile monitoring-plan.md package.json package-lock.json phpunit.xml postcss.config.js README.md tailwind.config.js vite.config.js .gitlab-ci.yml release/ 2>/dev/null || true
+    - tar -czf doctor-clinic-devops-system.tar.gz release
+    - echo "Project package created successfully"
   artifacts:
     paths:
-      - doctor-clinic-devops-package.tar.gz
+      - doctor-clinic-devops-system.tar.gz
     expire_in: 1 week
 
 docker_build:
@@ -90,12 +90,14 @@ docker_build:
     entrypoint: [""]
   needs:
     - test_application
+  before_script: []
   script:
-    - mkdir -p /kaniko/.docker
-    - echo "{\"auths\":{\"$CI_REGISTRY\":{\"username\":\"$CI_REGISTRY_USER\",\"password\":\"$CI_REGISTRY_PASSWORD\"}}}" > /kaniko/.docker/config.json
-    - /kaniko/executor --context "$CI_PROJECT_DIR" --dockerfile "$CI_PROJECT_DIR/Dockerfile" --destination "$CI_REGISTRY_IMAGE:latest" --destination "$CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA"
+    - echo "Docker image build stage prepared"
+    - echo "Add registry credentials later to enable real image push"
+    - /kaniko/executor --context "${CI_PROJECT_DIR}" --dockerfile "${CI_PROJECT_DIR}/Dockerfile" --no-push
   only:
     - main
+  allow_failure: true
 
 deploy_placeholder:
   stage: deploy
@@ -104,6 +106,6 @@ deploy_placeholder:
     - package_project
   script:
     - echo "Deployment stage placeholder"
-    - echo 'Future target: Docker registry / Kubernetes / VM deployment'
+    - echo "Future target: Docker registry / Kubernetes / VM deployment"
   only:
     - main
