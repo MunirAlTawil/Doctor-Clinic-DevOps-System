@@ -13,9 +13,7 @@ test:
   image: php:8.2
 
   before_script:
-    - apt-get update && apt-get install -y git unzip curl libzip-dev libpng-dev libicu-dev libonig-dev libxml2-dev
-    - curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
-    - apt-get install -y nodejs
+    - apt-get update && apt-get install -y git unzip curl nodejs npm libzip-dev libpng-dev libicu-dev libonig-dev libxml2-dev libsqlite3-dev sqlite3
     - docker-php-ext-install pdo pdo_sqlite mbstring bcmath intl zip
     - curl -sS https://getcomposer.org/installer | php
     - mv composer.phar /usr/local/bin/composer
