@@ -20,10 +20,15 @@ WORKDIR /var/www
 
 COPY . .
 
-RUN composer install --no-interaction --prefer-dist --optimize-autoloader
+RUN mkdir -p storage/framework/cache \
+    storage/framework/sessions \
+    storage/framework/views \
+    bootstrap/cache
+
+RUN cp .env.example .env || true
+
+RUN composer install --no-interaction --prefer-dist --optimize-autoloader --no-scripts
 
 RUN chown -R www-data:www-data /var/www/storage /var/www/bootstrap/cache
-
-EXPOSE 9000
 
 CMD ["php-fpm"]
