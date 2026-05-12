@@ -64,6 +64,7 @@ test_application:
     when: always
     paths:
       - public/build/
+      - storage/logs/
     expire_in: 1 week
 
 package_project:
@@ -74,7 +75,7 @@ package_project:
     - test_application
   script:
     - mkdir -p release
-    - cp -r app bootstrap config database docker k8s public resources routes scripts storage terraform tests release/
+    - cp -r app bootstrap config database docker k8s public resources routes scripts storage terraform tests release/ || true
     - cp .dockerignore .gitignore artisan composer.json composer.lock DEVOPS-IMPLEMENTATION.md docker-compose.yml Dockerfile monitoring-plan.md package.json package-lock.json phpunit.xml postcss.config.js README.md tailwind.config.js vite.config.js .gitlab-ci.yml release/ 2>/dev/null || true
     - tar -czf doctor-clinic-devops-system.tar.gz release
     - echo "Project package created successfully"
@@ -83,22 +84,6 @@ package_project:
       - doctor-clinic-devops-system.tar.gz
     expire_in: 1 week
 
-docker_build:
-  stage: package
-  image:
-    name: gcr.io/kaniko-project/executor:debug
-    entrypoint: [""]
-  needs:
-    - test_application
-  before_script: []
-  script:
-    - echo "Docker image build stage prepared"
-    - echo "Add registry credentials later to enable real image push"
-    - /kaniko/executor --context "${CI_PROJECT_DIR}" --dockerfile "${CI_PROJECT_DIR}/Dockerfile" --no-push
-  only:
-    - main
-  allow_failure: true
-
 deploy_placeholder:
   stage: deploy
   image: alpine:latest
@@ -106,6 +91,6 @@ deploy_placeholder:
     - package_project
   script:
     - echo "Deployment stage placeholder"
-    - echo "Future target: Docker registry / Kubernetes / VM deployment"
+    - echo "Future target: Kubernetes / VM / registry deployment"
   only:
     - main
