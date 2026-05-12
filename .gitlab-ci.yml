@@ -1,5 +1,7 @@
 stages:
+  - build
   - test
+  - deploy
 
 variables:
   APP_ENV: testing
@@ -8,8 +10,13 @@ variables:
   DB_DATABASE: database/database.sqlite
   COMPOSER_ALLOW_SUPERUSER: "1"
 
-test:
-  stage: test
+cache:
+  paths:
+    - vendor/
+    - node_modules/
+
+build-job:
+  stage: build
   image: php:8.2
 
   before_script:
@@ -21,9 +28,34 @@ test:
     - mkdir -p storage/framework/cache storage/framework/sessions storage/framework/views bootstrap/cache database
     - touch database/database.sqlite
     - chmod -R 777 storage bootstrap/cache database
+
+  script:
     - composer install --no-interaction --prefer-dist --optimize-autoloader
     - npm ci
     - npm run build
+
+  artifacts:
+    paths:
+      - vendor/
+      - node_modules/
+      - public/build/
+      - .env
+      - database/database.sqlite
+    expire_in: 1 hour
+
+test-job:
+  stage: test
+  image: php:8.2
+  dependencies:
+    - build-job
+
+  before_script:
+    - apt-get update && apt-get install -y git unzip curl libzip-dev libpng-dev libicu-dev libonig-dev libxml2-dev libsqlite3-dev sqlite3
+    - docker-php-ext-install pdo pdo_sqlite mbstring bcmath intl zip
+    - cp .env.example .env || true
+    - mkdir -p storage/framework/cache storage/framework/sessions storage/framework/views bootstrap/cache database
+    - touch database/database.sqlite
+    - chmod -R 777 storage bootstrap/cache database
     - php artisan key:generate
     - echo "APP_ENV=testing" >> .env
     - echo "APP_DEBUG=true" >> .env
@@ -34,3 +66,11 @@ test:
 
   script:
     - php artisan test
+
+deploy-job:
+  stage: deploy
+  image: alpine:latest
+  script:
+    - echo "Deploy stage placeholder - ready for future deployment"
+  only:
+    - main
