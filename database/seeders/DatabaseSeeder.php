@@ -28,6 +28,7 @@ class DatabaseSeeder extends Seeder
             DemoAppointmentAndPaymentSeeder::class,
             BulkQuickDoctorAppointmentsSeeder::class,
             MunirClinicQuickDemoAvailabilitySeeder::class,
+            ImagePathSeeder::class,
         ]);
     }
 }
