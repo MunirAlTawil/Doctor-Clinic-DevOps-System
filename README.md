@@ -2,7 +2,8 @@
 
 A Laravel-based clinic management and appointment booking platform with a complete DevOps delivery layer.
 
-**Live Application:** http://51.158.200.127:8080
+**Live Application:** http://51.158.200.127:8080  
+**Grafana Dashboard:** http://51.158.200.127:3000
 
 ---
 
@@ -23,13 +24,14 @@ The Doctor Clinic DevOps System supports three user roles in a unified web platf
 | Layer | Technologies |
 |-------|-------------|
 | Application | Laravel 12, PHP 8.2, Blade, Tailwind CSS, Alpine.js, Vite |
-| Database | MySQL 5.7 |
+| Database | MySQL 8.0 |
 | Containerization | Docker CE, Docker Compose v2, Nginx Alpine |
 | CI/CD | GitLab CI/CD (5 stages) |
 | Live Deployment | Proxmox VE 8.4.14, Ubuntu 22.04 VM |
+| Monitoring | Prometheus, Grafana, Node Exporter |
 | Deployment Prep | Kubernetes YAML manifests (10 files) |
 | IaC | Terraform (5 files) |
-| Operations | Backup script, monitoring plan |
+| Operations | Backup script, monitoring stack |
 
 ---
 
@@ -92,6 +94,8 @@ database/
 docker/
   nginx/                Nginx configuration
 k8s/                    10 Kubernetes YAML manifests
+monitoring/
+  prometheus.yml        Prometheus scrape configuration
 public/                 Public web root
 resources/              Views, CSS, JS sources
 routes/                 Laravel route definitions
@@ -101,7 +105,6 @@ tests/                  PHPUnit test suite
 .gitlab-ci.yml          GitLab CI/CD pipeline (5 stages)
 docker-compose.yml      Docker Compose stack definition
 Dockerfile              PHP 8.2-FPM application image
-monitoring-plan.md      Monitoring strategy documentation
 ```
 
 ---
@@ -136,7 +139,80 @@ The application is deployed on Proxmox VE 8.4.14:
 To verify the live deployment:
 ```bash
 docker compose ps
-# Expected: doktors_app, doktors_mysql, doktors_nginx all Up
+# Expected: doktors_app, doktors_mysql, doktors_nginx, doktors_prometheus, doktors_grafana all Up
+```
+
+---
+
+## Monitoring (Prometheus + Grafana)
+
+The system includes a live monitoring stack collecting real-time infrastructure metrics from the production VM.
+
+### Architecture
+
+```
+[Node Exporter :9100] ──► [Prometheus :9090] ──► [Grafana :3000]
+        │                        │                      │
+  Host metrics              Stores metrics         Dashboards &
+  CPU/RAM/Disk/Net          time-series data       Visualization
+```
+
+### Services
+
+| Service | URL | Credentials |
+|---------|-----|-------------|
+| Grafana | http://51.158.200.127:3000 | admin / admin |
+| Prometheus | http://51.158.200.127:9090 | — |
+| Node Exporter | port 9100 (internal) | — |
+
+### Metrics Collected
+
+| Category | Metrics |
+|----------|---------|
+| CPU | Usage %, system load (1m/5m/15m), busy/idle |
+| Memory | RAM used, cached, free, swap |
+| Disk | Filesystem usage per mount point |
+| Network | Inbound/outbound traffic per interface |
+| System | Uptime, processes, file descriptors |
+
+### Start Monitoring Stack
+
+```bash
+# Start all services including monitoring
+docker compose up -d
+
+# Start Node Exporter (host metrics agent)
+docker run -d --name node_exporter --net="host" prom/node-exporter
+```
+
+### Grafana Setup
+
+1. Open http://51.158.200.127:3000 → login: admin / admin
+2. Go to **Connections → Data sources → prometheus**
+3. Set URL: `http://10.10.10.100:9090` → **Save & test**
+4. Go to **Dashboards → Import → ID: 1860** → **Import**
+
+### prometheus.yml
+
+```yaml
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    monitor: 'doctor-clinic-monitor'
+
+scrape_configs:
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+
+  - job_name: 'node'
+    static_configs:
+      - targets: ['localhost:9100']
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: instance
+        replacement: 'Doctors-Clinic-DevOps-System'
 ```
 
 ---
@@ -162,7 +238,6 @@ kubectl apply -f k8s/
 Files in `terraform/`:
 ```bash
 cp terraform/terraform.tfvars.example terraform/terraform.tfvars
-# Edit terraform.tfvars with your values
 terraform init
 terraform plan
 terraform apply
