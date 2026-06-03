@@ -96,12 +96,17 @@ deploy_production:
     - ssh-keyscan -H $DEPLOY_HOST >> ~/.ssh/known_hosts
   script:
     - echo "Deploying to Proxmox VM at $DEPLOY_HOST"
+    - scp -i ~/.ssh/id_ed25519 -o StrictHostKeyChecking=no monitoring/prometheus.yml ubuntu@$DEPLOY_HOST:/opt/doctor-clinic/prometheus.yml
     - ssh -i ~/.ssh/id_ed25519 -o StrictHostKeyChecking=no ubuntu@$DEPLOY_HOST "
         cd /opt/doctor-clinic &&
-        sudo docker stop doktors_prometheus doktors_grafana 2>/dev/null || true &&
-        sudo docker rm doktors_prometheus doktors_grafana 2>/dev/null || true &&
+        sudo docker stop doktors_prometheus doktors_grafana node_exporter 2>/dev/null || true &&
+        sudo docker rm doktors_prometheus doktors_grafana node_exporter 2>/dev/null || true &&
         sudo docker compose pull prometheus grafana &&
         sudo docker compose up -d &&
+        sudo docker run -d --name node_exporter --net=host prom/node-exporter &&
+        sudo docker stop doktors_prometheus 2>/dev/null || true &&
+        sudo docker rm doktors_prometheus 2>/dev/null || true &&
+        sudo docker run -d --name doktors_prometheus --net=host -v /opt/doctor-clinic/prometheus.yml:/etc/prometheus/prometheus.yml prom/prometheus &&
         sudo docker ps --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}' &&
         echo 'Deployment successful!'"
     - echo "Application live at http://51.158.200.127:8080"
