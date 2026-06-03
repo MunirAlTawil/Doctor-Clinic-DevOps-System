@@ -29,7 +29,7 @@ The Doctor Clinic system supports three user roles:
 | Containerization | Docker CE, Docker Compose v2, Nginx Alpine |
 | CI/CD | GitLab CI/CD (5 stages: validate → build → test → package → deploy) |
 | Live Deployment | Proxmox VE 8.4, Ubuntu 22.04 VM, iptables NAT |
-| Monitoring | Prometheus + Node Exporter + Grafana (Node Exporter Full dashboard) |
+| Monitoring | Prometheus + Node Exporter + Grafana (persistent volumes) |
 | Deployment Prep | Kubernetes YAML manifests (10 files) |
 | IaC | Terraform (5 files) |
 | Runner | GitLab Runner 19.0.1 on Proxmox VM (tag: proxmox) |
@@ -104,7 +104,7 @@ scripts/                Backup automation scripts
 terraform/              IaC files (5 files)
 tests/                  PHPUnit test suite
 .gitlab-ci.yml          GitLab CI/CD pipeline (5 stages)
-docker-compose.yml      Full stack: app + monitoring
+docker-compose.yml      Full stack: app + monitoring + persistent volumes
 Dockerfile              PHP 8.2-FPM application image
 ```
 
@@ -120,7 +120,7 @@ The pipeline runs **automatically on every push to `main`**:
 | build | build_frontend | npm ci + npm run build (Vite) |
 | test | test_application | SQLite + migrations + PHPUnit |
 | package | package_project | tar.gz release archive |
-| deploy | deploy_production | SSH deploy to Proxmox VM |
+| deploy | deploy_production | SSH auto-deploy to Proxmox VM |
 
 ### What deploy_production does automatically:
 1. Copies `monitoring/prometheus.yml` to the server via SCP
@@ -128,7 +128,7 @@ The pipeline runs **automatically on every push to `main`**:
 3. Pulls latest images
 4. Starts all containers via `docker compose up -d`
 5. Starts Node Exporter for host metrics
-6. Starts Prometheus with the correct config
+6. Starts Prometheus with the correct scrape config
 7. Verifies all containers are running
 
 ### GitLab Runner
@@ -149,7 +149,7 @@ The pipeline runs **automatically on every push to `main`**:
 | OS | Ubuntu 22.04.5 LTS |
 | VM Resources | 2 vCPU / 4 GB RAM / 22 GB Disk |
 | Internal IP | 10.10.10.100 |
-| Network | vmbr1 + iptables NAT (port 8080, 3000, 9090) |
+| Network | vmbr1 + iptables NAT (ports: 8080, 3000, 9090) |
 
 ### Running Containers
 
@@ -163,6 +163,14 @@ doktors_prometheus     Up            9090/tcp
 node_exporter          Up            9100/tcp
 ```
 
+### Persistent Volumes
+
+| Volume | Purpose |
+|--------|---------|
+| doktors_mysql_data | MySQL database persistence |
+| prometheus_data | Prometheus metrics history (15 days retention) |
+| grafana_data | Grafana dashboards and data sources |
+
 ---
 
 ## Monitoring Stack (Prometheus + Grafana)
@@ -173,7 +181,8 @@ node_exporter          Up            9100/tcp
 [Node Exporter :9100] ──► [Prometheus :9090] ──► [Grafana :3000]
         │                        │                      │
   Host metrics              Stores metrics         Dashboards &
-  CPU/RAM/Disk/Net          time-series data       Visualization
+  CPU/RAM/Disk/Net          (15d retention)        Visualization
+                                                   (persistent)
 ```
 
 ### Access
@@ -194,8 +203,11 @@ node_exporter          Up            9100/tcp
 | Network | Inbound/outbound traffic per interface |
 | System | Uptime, processes |
 
-### Grafana Dashboard Setup
+### Grafana Dashboard
 
+The Grafana dashboard and data source configuration are **automatically persisted** via Docker volumes. After initial setup, dashboards and settings survive container restarts and redeployments.
+
+**First-time setup only:**
 1. Open http://51.158.200.127:3000 → login: `admin` / `admin`
 2. **Connections → Data sources → prometheus** → URL: `http://10.10.10.100:9090` → **Save & test**
 3. **Dashboards → New → Import** → ID: `1860` → **Import**
