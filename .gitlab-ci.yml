@@ -96,8 +96,9 @@ deploy_production:
     - ssh-keyscan -H $DEPLOY_HOST >> ~/.ssh/known_hosts
   script:
     - echo "Deploying to Proxmox VM at $DEPLOY_HOST"
-    - scp -i ~/.ssh/id_ed25519 -o StrictHostKeyChecking=no monitoring/prometheus.yml ubuntu@$DEPLOY_HOST:/opt/doctor-clinic/prometheus.yml
+    - scp -i ~/.ssh/id_ed25519 -o StrictHostKeyChecking=no monitoring/prometheus.yml ubuntu@$DEPLOY_HOST:/tmp/prometheus.yml
     - ssh -i ~/.ssh/id_ed25519 -o StrictHostKeyChecking=no ubuntu@$DEPLOY_HOST "
+        sudo mv /tmp/prometheus.yml /opt/doctor-clinic/prometheus.yml &&
         cd /opt/doctor-clinic &&
         sudo docker stop doktors_prometheus doktors_grafana node_exporter 2>/dev/null || true &&
         sudo docker rm doktors_prometheus doktors_grafana node_exporter 2>/dev/null || true &&
