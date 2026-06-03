@@ -1,21 +1,22 @@
 # Doctor Clinic DevOps System
 
-A Laravel-based clinic management and appointment booking platform with a complete DevOps delivery layer.
+A Laravel-based clinic management and appointment booking platform with a complete DevOps delivery layer — containerized, automatically tested, deployed to a live server, and monitored in real time.
 
 **Live Application:** http://51.158.200.127:8080  
-**Grafana Dashboard:** http://51.158.200.127:3000
+**Grafana Monitoring:** http://51.158.200.127:3000  
+**CI/CD:** GitLab Pipelines — auto-deploy on every push to `main`
 
 ---
 
 ## Project Overview
 
-The Doctor Clinic DevOps System supports three user roles in a unified web platform:
+The Doctor Clinic system supports three user roles:
 
 | Role | Capabilities |
 |------|-------------|
 | Patient | Register, browse doctors and specialties, book appointments, patient dashboard |
-| Doctor | Manage profile, availability, appointments, doctor dashboard |
-| Admin | Manage users, specialties, reports, settings, pages, approvals |
+| Doctor | Manage profile, availability, and appointments |
+| Admin | Manage users, specialties, reports, settings, approvals |
 
 ---
 
@@ -26,12 +27,12 @@ The Doctor Clinic DevOps System supports three user roles in a unified web platf
 | Application | Laravel 12, PHP 8.2, Blade, Tailwind CSS, Alpine.js, Vite |
 | Database | MySQL 8.0 |
 | Containerization | Docker CE, Docker Compose v2, Nginx Alpine |
-| CI/CD | GitLab CI/CD (5 stages) |
-| Live Deployment | Proxmox VE 8.4.14, Ubuntu 22.04 VM |
-| Monitoring | Prometheus, Grafana, Node Exporter |
+| CI/CD | GitLab CI/CD (5 stages: validate → build → test → package → deploy) |
+| Live Deployment | Proxmox VE 8.4, Ubuntu 22.04 VM, iptables NAT |
+| Monitoring | Prometheus + Node Exporter + Grafana (Node Exporter Full dashboard) |
 | Deployment Prep | Kubernetes YAML manifests (10 files) |
 | IaC | Terraform (5 files) |
-| Operations | Backup script, monitoring stack |
+| Runner | GitLab Runner 19.0.1 on Proxmox VM (tag: proxmox) |
 
 ---
 
@@ -78,7 +79,7 @@ docker compose exec app npm run build
 docker compose exec app chown -R www-data:www-data /var/www/storage /var/www/bootstrap/cache
 ```
 
-Application is available at: **http://localhost:8080**
+Application available at: **http://localhost:8080**
 
 ---
 
@@ -100,10 +101,10 @@ public/                 Public web root
 resources/              Views, CSS, JS sources
 routes/                 Laravel route definitions
 scripts/                Backup automation scripts
-terraform/              IaC starter files (5 files)
+terraform/              IaC files (5 files)
 tests/                  PHPUnit test suite
 .gitlab-ci.yml          GitLab CI/CD pipeline (5 stages)
-docker-compose.yml      Docker Compose stack definition
+docker-compose.yml      Full stack: app + monitoring
 Dockerfile              PHP 8.2-FPM application image
 ```
 
@@ -111,21 +112,34 @@ Dockerfile              PHP 8.2-FPM application image
 
 ## CI/CD Pipeline (GitLab)
 
-The pipeline runs automatically on every push:
+The pipeline runs **automatically on every push to `main`**:
 
 | Stage | Job | Description |
 |-------|-----|-------------|
-| validate | php_syntax | PHP lint check on all source files |
+| validate | php_syntax | PHP lint on all source files |
 | build | build_frontend | npm ci + npm run build (Vite) |
-| test | test_application | SQLite DB + migrations + PHPUnit tests |
+| test | test_application | SQLite + migrations + PHPUnit |
 | package | package_project | tar.gz release archive |
-| deploy | deploy_placeholder | Deployment to target environment |
+| deploy | deploy_production | SSH deploy to Proxmox VM |
+
+### What deploy_production does automatically:
+1. Copies `monitoring/prometheus.yml` to the server via SCP
+2. Stops and removes old containers
+3. Pulls latest images
+4. Starts all containers via `docker compose up -d`
+5. Starts Node Exporter for host metrics
+6. Starts Prometheus with the correct config
+7. Verifies all containers are running
+
+### GitLab Runner
+- **Runner:** Doctors-Clinic-VM (#53489811)
+- **Host:** 51.158.200.127
+- **Tag:** proxmox
+- **Version:** GitLab Runner 19.0.1
 
 ---
 
 ## Live Deployment (Proxmox)
-
-The application is deployed on Proxmox VE 8.4.14:
 
 | Property | Value |
 |----------|-------|
@@ -134,19 +148,24 @@ The application is deployed on Proxmox VE 8.4.14:
 | VM | 100 / Doctors-Clinic-DevOps-System |
 | OS | Ubuntu 22.04.5 LTS |
 | VM Resources | 2 vCPU / 4 GB RAM / 22 GB Disk |
-| Network | vmbr1 (10.10.10.100) + iptables NAT |
+| Internal IP | 10.10.10.100 |
+| Network | vmbr1 + iptables NAT (port 8080, 3000, 9090) |
 
-To verify the live deployment:
-```bash
-docker compose ps
-# Expected: doktors_app, doktors_mysql, doktors_nginx, doktors_prometheus, doktors_grafana all Up
+### Running Containers
+
+```
+NAMES                  STATUS        PORTS
+doktors_nginx          Up            0.0.0.0:8080->80/tcp
+doktors_app            Up            9000/tcp
+doktors_mysql          Up            0.0.0.0:3307->3306/tcp
+doktors_grafana        Up            0.0.0.0:3000->3000/tcp
+doktors_prometheus     Up            9090/tcp
+node_exporter          Up            9100/tcp
 ```
 
 ---
 
-## Monitoring (Prometheus + Grafana)
-
-The system includes a live monitoring stack collecting real-time infrastructure metrics from the production VM.
+## Monitoring Stack (Prometheus + Grafana)
 
 ### Architecture
 
@@ -157,7 +176,7 @@ The system includes a live monitoring stack collecting real-time infrastructure 
   CPU/RAM/Disk/Net          time-series data       Visualization
 ```
 
-### Services
+### Access
 
 | Service | URL | Credentials |
 |---------|-----|-------------|
@@ -169,28 +188,17 @@ The system includes a live monitoring stack collecting real-time infrastructure 
 
 | Category | Metrics |
 |----------|---------|
-| CPU | Usage %, system load (1m/5m/15m), busy/idle |
+| CPU | Usage %, system load (1m/5m/15m) |
 | Memory | RAM used, cached, free, swap |
 | Disk | Filesystem usage per mount point |
 | Network | Inbound/outbound traffic per interface |
-| System | Uptime, processes, file descriptors |
+| System | Uptime, processes |
 
-### Start Monitoring Stack
+### Grafana Dashboard Setup
 
-```bash
-# Start all services including monitoring
-docker compose up -d
-
-# Start Node Exporter (host metrics agent)
-docker run -d --name node_exporter --net="host" prom/node-exporter
-```
-
-### Grafana Setup
-
-1. Open http://51.158.200.127:3000 → login: admin / admin
-2. Go to **Connections → Data sources → prometheus**
-3. Set URL: `http://10.10.10.100:9090` → **Save & test**
-4. Go to **Dashboards → Import → ID: 1860** → **Import**
+1. Open http://51.158.200.127:3000 → login: `admin` / `admin`
+2. **Connections → Data sources → prometheus** → URL: `http://10.10.10.100:9090` → **Save & test**
+3. **Dashboards → New → Import** → ID: `1860` → **Import**
 
 ### prometheus.yml
 
@@ -213,6 +221,10 @@ scrape_configs:
       - source_labels: [__address__]
         target_label: instance
         replacement: 'Doctors-Clinic-DevOps-System'
+
+  - job_name: 'docker'
+    static_configs:
+      - targets: ['localhost:9323']
 ```
 
 ---
@@ -220,12 +232,10 @@ scrape_configs:
 ## Kubernetes (Future Deployment)
 
 Manifests in `k8s/`:
-- `namespace.yaml` – dedicated namespace
-- `secrets.yaml` – encoded credentials
-- `pvc.yaml` – persistent volume
-- `mysql-deployment.yaml` + `mysql-service.yaml`
-- `app-deployment.yaml` + `app-service.yaml`
-- `nginx-configmap.yaml` + `nginx-deployment.yaml` + `nginx-service.yaml`
+- `namespace.yaml`, `secrets.yaml`, `pvc.yaml`
+- `mysql-deployment.yaml`, `mysql-service.yaml`
+- `app-deployment.yaml`, `app-service.yaml`
+- `nginx-configmap.yaml`, `nginx-deployment.yaml`, `nginx-service.yaml`
 
 ```bash
 kubectl apply -f k8s/
@@ -235,7 +245,6 @@ kubectl apply -f k8s/
 
 ## Infrastructure as Code (Terraform)
 
-Files in `terraform/`:
 ```bash
 cp terraform/terraform.tfvars.example terraform/terraform.tfvars
 terraform init
@@ -248,7 +257,6 @@ terraform apply
 ## Backup
 
 ```bash
-# Run backup script
 ./scripts/backup.ps1
 # Creates: MySQL dump + public/storage archive
 ```
@@ -273,4 +281,4 @@ terraform apply
 **Muhammed Munir Al Tawil**  
 DevOps – Application Deployment and Lifecycle  
 DataScientest – Sorbonne University Partnership – 2026  
-Mentor: Durrell Liora
+Mentor: Durrell Gemuh
